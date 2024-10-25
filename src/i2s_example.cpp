@@ -31,15 +31,22 @@
 #include "hardware/irq.h"
 #include "hardware/pio.h"
 #include "pico/stdlib.h"
+
+#include "sgtl5000.h"
 #include "i2s.h"
 
 // I2C defines
 //
 // This code uses I2C1 on GPIO14 (SDA) and GPIO15 (SCL) running at 100KHz.
 // 
+const uint I2C_SDA = 14;
+const uint I2C_SCL = 15;
 #define I2C_PORT i2c1
-#define I2C_SDA  14
-#define I2C_SCL  15
+
+// Values for blinking the LED
+//
+const uint32_t SLOW_BLINK = 2000;
+const uint32_t FAST_BLINK = 250;
 
 #ifndef PICO_DEFAULT_LED_PIN
 #warning blink example requires a board with a regular LED
@@ -47,18 +54,44 @@
 const uint LED_PIN = PICO_DEFAULT_LED_PIN;
 #endif
 
+// Initialization for the I2S
+//
 static __attribute__((aligned(8))) pio_i2s i2s;
+
+// Values used to initialize the DDS
+// f_out = f_s * n / N
+//
+const float tone = 1000;    // default value
+const float f_s = 48000;
+const uint16_t N = 1024;
+
+static uint16_t n = N * tone / f_s; 
+static uint16_t acc = 0;
+static float samples[N];
 
 
 /**
  * @brief Callback for processing the incoming audio
  */
-static void process_audio(const int32_t* input, int32_t* output, size_t num_frames) 
+static auto process_audio(
+    [[maybe_unused]] const int32_t* input, 
+    [[maybe_unused]] int32_t* output, 
+    size_t num_frames) -> void 
 {
-    // Just copy the input to the output
+    // Copy over values for sending out the tone.
+    // 
+    // Values being sent to the codec are 32 bit signed 
+    // values but the samples are only 16 bits so they
+    // need to be pushed to the left edge.
     //
-    for (size_t i = 0; i < num_frames * 2; i++) {
-        output[i] = input[i];
+    for (size_t i = 0; i < num_frames; i++)
+    {
+        int32_t value_32 = static_cast<int32_t>(16384.0 * samples[acc]);    // 16384 = 2^14
+        int32_t value = value_32 << 16;
+
+        output[2 * i + 0] = value;      // right channel
+        output[2 * i + 1] = 0x00;       // left channel
+        acc = (acc + n) % N;
     }
 }
 
@@ -66,7 +99,7 @@ static void process_audio(const int32_t* input, int32_t* output, size_t num_fram
 /**
  * @brief Handler for when the DMA is ready
  */
-static void dma_i2s_in_handler(void) 
+static auto dma_i2s_in_handler() -> void 
 {
     // We're double buffering using chained TCBs. By checking which buffer the
     // DMA is currently reading from, we can identify which buffer it has just
@@ -76,23 +109,30 @@ static void dma_i2s_in_handler(void)
     {
         // It is inputting to the second buffer so we can overwrite the first
         //
-        process_audio(i2s.input_buffer, i2s.output_buffer, AUDIO_BUFFER_FRAMES);
+        process_audio(
+            i2s.input_buffer, 
+            i2s.output_buffer, 
+            AUDIO_BUFFER_FRAMES);
     } 
     else 
     {
         // It is currently inputting the first buffer, so we write to the second
         //
-        process_audio(&i2s.input_buffer[STEREO_BUFFER_SIZE], &i2s.output_buffer[STEREO_BUFFER_SIZE], AUDIO_BUFFER_FRAMES);
+        process_audio(
+            &i2s.input_buffer[STEREO_BUFFER_SIZE], 
+            &i2s.output_buffer[STEREO_BUFFER_SIZE], 
+            AUDIO_BUFFER_FRAMES);
     }
     dma_hw->ints0 = 1u << i2s.dma_ch_in_data;  // clear the IRQ
 }
 
 
 /**
- * @brief Scan the I2C bus to return the codec I2C address
+ * @brief Scan the I2C bus for device addresses
+ * 
  * @return Codec I2C address
  */
-static std::optional<uint8_t> i2c_address()
+static auto i2c_address() -> std::optional<uint8_t>
 {
     std::optional<uint8_t> i2c_addr {};
 
@@ -118,8 +158,20 @@ static std::optional<uint8_t> i2c_address()
 /**
  * @brief Main program
  */
-int main() 
+auto main() -> int 
 {
+    // Local values
+    //
+    sgtl5000 codec(I2C_PORT);
+
+    // Initialize the DDS samples array
+    //
+    for (size_t i = 0; i < N; i++)
+    {
+        float value = std::sin(M_TWOPI * static_cast<float>(i) / static_cast<float>(N));
+        samples[i] = value;
+    }
+
     // Set a 132.000 MHz system clock to more evenly divide the audio frequencies
     //
     set_sys_clock_khz(132000, true);
@@ -136,10 +188,11 @@ int main()
 
     // I2S initialiation.
     //
-    // You can set the I2S configuration by changing values in the
-    // i2s_configf_default structure contained in i2s.c.
+    // The default I2S configuration is in the i2s_configf_default 
+    // structure contained in i2s.c.
     //
-    i2s_program_start_synched(pio0, &i2s_config_default, dma_i2s_in_handler, &i2s);
+    i2s_config i2s_configuration = i2s_config_default;
+    i2s_program_start_synched(pio0, &i2s_configuration, dma_i2s_in_handler, &i2s);
 
     // I2C Initialisation at 100Khz.
     //
@@ -164,10 +217,16 @@ int main()
 
     // Complete the code initialiation.
     //
+    codec.init();                                           // Initialize the codec
+    codec.mute_dac(false);                                  // Unmute the DAC
+    codec.dac_volume(0.8, 0.8);                             // Set the DAC volumn
+    codec.headphone_select(codec.AUDIO_HEADPHONE_DAC);      // Select the headphones for audio out
+    codec.mute_headphone(false);                            // Unmute the headphone
+    codec.volume(0.7, 0.7);                                 // Set the headphone volume
 
     // Blink the LED so we know we started everything correctly.
     //
-    uint32_t led_delay = (i2c_addr.has_value()) ? 250 : 2000;
+    uint32_t led_delay = (i2c_addr.has_value()) ? FAST_BLINK : SLOW_BLINK;
     while (true) {
         gpio_put(LED_PIN, 1);
         sleep_ms(led_delay);

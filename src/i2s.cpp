@@ -34,7 +34,7 @@ const i2s_config i2s_config_default = {
     10,         // master clock pin
     6,          // data out
     7,          // data in
-    8,          // clock pin base (LRCLOCK/BCLOCK)
+    8,          // clock pin base (BCLOCK = 8/LRCLOCK = 9)
     true        // enable master clock
 };
 
