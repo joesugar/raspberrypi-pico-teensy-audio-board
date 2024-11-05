@@ -1,13 +1,33 @@
 #include "sgtl5000.h"
 #include <iostream>
 
-/**
+/* 
+ * This code is based upon the SGTL5000 micropython driver and 
+ * is distributed in the hope that it will be useful, but WITHOUT 
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY 
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public 
+ * License for more details.
+ *
+ * This example is free software: you can redistribute it and/or modify 
+ * it under the terms of the GNU General Public License, version 3 as 
+ * published by the Free Software Foundation.
+ *
+ * You should have received a copy of the GNU General Public License 
+ * along with this. If not, see <https://www.gnu.org/licenses/>.
+  *
  * Code programming document can be found at 
  * https://www.nxp.com/docs/en/application-note/AN3663.pdf
  * 
  * Data sheet can be found at
  * https://www.pjrc.com/teensy/SGTL5000.pdf
+ * 
+ * Author: Joseph A Consugar
+ * Date:   October 2024
+ *
+ * Copyright (c) 2024 Joseph A Consugar
  */
+
+
 /**
  * Constructor
  */
@@ -109,6 +129,7 @@ auto sgtl5000::dac_volume(float left, float right) -> void
 {
     // Make sure the volume is within thew proper range.
     // Range is from 0x3c (0 dB) to 0xFC (muted)
+    //
     if ((left < 0.0) || (right < 0.0))
         return;
     if ((left > 1.0) || (right > 1.0))

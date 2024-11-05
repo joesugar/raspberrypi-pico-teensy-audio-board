@@ -1,5 +1,10 @@
 # CMakeLists.txt
 #
+# Copyright (c) 2024 Joseph Consugar
+#
+# This example is based upon one originally written by Daniel Collins.
+# Original copyright and description contained below.
+#
 # Copyright (c) 2022 Daniel Collins
 #
 # This file is part of rp2040_i2s_example.
